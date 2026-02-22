@@ -1,12 +1,14 @@
 import base64
 import json
 import asyncio
+import signal
 import time
 import os
 import websockets
+from collections import OrderedDict
 from loguru import logger
 from dotenv import load_dotenv, set_key
-from XianyuApis import XianyuApis
+from XianyuApis import XianyuApis, CookieExpiredError
 import sys
 import random
 
@@ -16,16 +18,35 @@ from XianyuAgent import XianyuReplyBot
 from context_manager import ChatContextManager
 
 
+class MessageKeys:
+    """WebSocket 消息字段常量，避免硬编码魔法字符串"""
+    MSG_DATA = "1"          # 消息主体
+    CONVERSATION = "2"      # 会话信息
+    MSG_META = "3"          # 消息元数据
+    TIMESTAMP = "5"         # 创建时间
+    NOTIFICATION = "10"     # 通知体
+    REMINDER_CONTENT = "reminderContent"
+    REMINDER_TITLE = "reminderTitle"
+    REMINDER_URL = "reminderUrl"
+    SENDER_USER_ID = "senderUserId"
+    RED_REMINDER = "redReminder"
+    NEED_PUSH = "needPush"
+
+
+MK = MessageKeys
+
+
 class XianyuLive:
-    def __init__(self, cookies_str):
+    def __init__(self, cookies_str, bot):
         self.xianyu = XianyuApis()
-        self.base_url = 'wss://wss-goofish.dingtalk.com/'
+        self.base_url = os.getenv("GOOFISH_WS_URL", "wss://wss-goofish.dingtalk.com/")
         self.cookies_str = cookies_str
         self.cookies = trans_cookies(cookies_str)
         self.xianyu.session.cookies.update(self.cookies)  # 直接使用 session.cookies.update
         self.myid = self.cookies['unb']
         self.device_id = generate_device_id(self.myid)
         self.context_manager = ChatContextManager()
+        self.bot = bot
         
         # 心跳相关配置
         self.heartbeat_interval = int(os.getenv("HEARTBEAT_INTERVAL", "15"))  # 心跳间隔，默认15秒
@@ -56,6 +77,22 @@ class XianyuLive:
         
         # 模拟人工输入配置
         self.simulate_human_typing = os.getenv("SIMULATE_HUMAN_TYPING", "False").lower() == "true"
+
+        # 重连退避
+        self.reconnect_attempt = 0
+        self.max_reconnect_delay = int(os.getenv("MAX_RECONNECT_DELAY", "300"))
+        self.max_reconnect_attempts = int(os.getenv("MAX_RECONNECT_ATTEMPTS", "0"))  # 0 表示无限
+
+        # 消息去重缓存（防止 WebSocket 重复推送导致重复回复）
+        self._processed_msgs: OrderedDict = OrderedDict()
+        self._processed_msgs_max = int(os.getenv("MSG_CACHE_SIZE", "1000"))
+
+        # 回复冷却（简单速率限制）
+        self._reply_cooldown = float(os.getenv("REPLY_COOLDOWN", "1.0"))
+        self._last_reply_times: dict = {}
+
+        # 优雅关停标志
+        self._shutdown = False
 
     async def refresh_token(self):
         """刷新token"""
@@ -110,50 +147,53 @@ class XianyuLive:
                 await asyncio.sleep(60)
 
     async def send_msg(self, ws, cid, toid, text):
-        text = {
-            "contentType": 1,
-            "text": {
-                "text": text
-            }
-        }
-        text_base64 = str(base64.b64encode(json.dumps(text).encode('utf-8')), 'utf-8')
-        msg = {
-            "lwp": "/r/MessageSend/sendByReceiverScope",
-            "headers": {
-                "mid": generate_mid()
-            },
-            "body": [
-                {
-                    "uuid": generate_uuid(),
-                    "cid": f"{cid}@goofish",
-                    "conversationType": 1,
-                    "content": {
-                        "contentType": 101,
-                        "custom": {
-                            "type": 1,
-                            "data": text_base64
-                        }
-                    },
-                    "redPointPolicy": 0,
-                    "extension": {
-                        "extJson": "{}"
-                    },
-                    "ctx": {
-                        "appVersion": "1.0",
-                        "platform": "web"
-                    },
-                    "mtags": {},
-                    "msgReadStatusSetting": 1
-                },
-                {
-                    "actualReceivers": [
-                        f"{toid}@goofish",
-                        f"{self.myid}@goofish"
-                    ]
+        try:
+            text = {
+                "contentType": 1,
+                "text": {
+                    "text": text
                 }
-            ]
-        }
-        await ws.send(json.dumps(msg))
+            }
+            text_base64 = str(base64.b64encode(json.dumps(text).encode('utf-8')), 'utf-8')
+            msg = {
+                "lwp": "/r/MessageSend/sendByReceiverScope",
+                "headers": {
+                    "mid": generate_mid()
+                },
+                "body": [
+                    {
+                        "uuid": generate_uuid(),
+                        "cid": f"{cid}@goofish",
+                        "conversationType": 1,
+                        "content": {
+                            "contentType": 101,
+                            "custom": {
+                                "type": 1,
+                                "data": text_base64
+                            }
+                        },
+                        "redPointPolicy": 0,
+                        "extension": {
+                            "extJson": "{}"
+                        },
+                        "ctx": {
+                            "appVersion": "1.0",
+                            "platform": "web"
+                        },
+                        "mtags": {},
+                        "msgReadStatusSetting": 1
+                    },
+                    {
+                        "actualReceivers": [
+                            f"{toid}@goofish",
+                            f"{self.myid}@goofish"
+                        ]
+                    }
+                ]
+            }
+            await ws.send(json.dumps(msg))
+        except Exception as e:
+            logger.error(f"发送消息失败: {e}")
 
     async def init(self, ws):
         # 如果没有token或者token过期，获取新token
@@ -169,7 +209,7 @@ class XianyuLive:
             "lwp": "/reg",
             "headers": {
                 "cache-header": "app-key token ua wv",
-                "app-key": "444e9908a51d1cb236a27862abc769c9",
+                "app-key": self.xianyu.ws_app_key,
                 "token": self.current_token,
                 "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36 DingTalk(2.1.5) OS(Windows/10) Browser(Chrome/133.0.0.0) DingWeb/2.1.5 IMPaaS DingWeb/2.1.5",
                 "dt": "j",
@@ -192,12 +232,12 @@ class XianyuLive:
         """判断是否为用户聊天消息"""
         try:
             return (
-                isinstance(message, dict) 
-                and "1" in message 
-                and isinstance(message["1"], dict)  # 确保是字典类型
-                and "10" in message["1"]
-                and isinstance(message["1"]["10"], dict)  # 确保是字典类型
-                and "reminderContent" in message["1"]["10"]
+                isinstance(message, dict)
+                and MK.MSG_DATA in message
+                and isinstance(message[MK.MSG_DATA], dict)
+                and MK.NOTIFICATION in message[MK.MSG_DATA]
+                and isinstance(message[MK.MSG_DATA][MK.NOTIFICATION], dict)
+                and MK.REMINDER_CONTENT in message[MK.MSG_DATA][MK.NOTIFICATION]
             )
         except Exception:
             return False
@@ -220,13 +260,13 @@ class XianyuLive:
         try:
             return (
                 isinstance(message, dict)
-                and "1" in message
-                and isinstance(message["1"], list)
-                and len(message["1"]) > 0
-                and isinstance(message["1"][0], dict)
-                and "1" in message["1"][0]
-                and isinstance(message["1"][0]["1"], str)
-                and "@goofish" in message["1"][0]["1"]
+                and MK.MSG_DATA in message
+                and isinstance(message[MK.MSG_DATA], list)
+                and len(message[MK.MSG_DATA]) > 0
+                and isinstance(message[MK.MSG_DATA][0], dict)
+                and MK.MSG_DATA in message[MK.MSG_DATA][0]
+                and isinstance(message[MK.MSG_DATA][0][MK.MSG_DATA], str)
+                and "@goofish" in message[MK.MSG_DATA][0][MK.MSG_DATA]
             )
         except Exception:
             return False
@@ -236,10 +276,10 @@ class XianyuLive:
         try:
             return (
                 isinstance(message, dict)
-                and "3" in message
-                and isinstance(message["3"], dict)
-                and "needPush" in message["3"]
-                and message["3"]["needPush"] == "false"
+                and MK.MSG_META in message
+                and isinstance(message[MK.MSG_META], dict)
+                and MK.NEED_PUSH in message[MK.MSG_META]
+                and message[MK.MSG_META][MK.NEED_PUSH] == "false"
             )
         except Exception:
             return False
@@ -354,28 +394,8 @@ class XianyuLive:
         return json.dumps(summary, ensure_ascii=False)
 
     async def handle_message(self, message_data, websocket):
-        """处理所有类型的消息"""
+        """处理所有类型的消息（ACK 已在 main 循环中统一发送）"""
         try:
-
-            try:
-                message = message_data
-                ack = {
-                    "code": 200,
-                    "headers": {
-                        "mid": message["headers"]["mid"] if "mid" in message["headers"] else generate_mid(),
-                        "sid": message["headers"]["sid"] if "sid" in message["headers"] else '',
-                    }
-                }
-                if 'app-key' in message["headers"]:
-                    ack["headers"]["app-key"] = message["headers"]["app-key"]
-                if 'ua' in message["headers"]:
-                    ack["headers"]["ua"] = message["headers"]["ua"]
-                if 'dt' in message["headers"]:
-                    ack["headers"]["dt"] = message["headers"]["dt"]
-                await websocket.send(json.dumps(ack))
-            except Exception as e:
-                pass
-
             # 如果不是同步包消息，直接返回
             if not self.is_sync_package(message_data):
                 return
@@ -406,24 +426,25 @@ class XianyuLive:
 
             try:
                 # 判断是否为订单消息,需要自行编写付款后的逻辑
-                if message['3']['redReminder'] == '等待买家付款':
-                    user_id = message['1'].split('@')[0]
+                red_reminder = message[MK.MSG_META][MK.RED_REMINDER]
+                if red_reminder == '等待买家付款':
+                    user_id = message[MK.MSG_DATA].split('@')[0]
                     user_url = f'https://www.goofish.com/personal?userId={user_id}'
                     logger.info(f'等待买家 {user_url} 付款')
                     return
-                elif message['3']['redReminder'] == '交易关闭':
-                    user_id = message['1'].split('@')[0]
+                elif red_reminder == '交易关闭':
+                    user_id = message[MK.MSG_DATA].split('@')[0]
                     user_url = f'https://www.goofish.com/personal?userId={user_id}'
                     logger.info(f'买家 {user_url} 交易关闭')
                     return
-                elif message['3']['redReminder'] == '等待卖家发货':
-                    user_id = message['1'].split('@')[0]
+                elif red_reminder == '等待卖家发货':
+                    user_id = message[MK.MSG_DATA].split('@')[0]
                     user_url = f'https://www.goofish.com/personal?userId={user_id}'
                     logger.info(f'交易成功 {user_url} 等待卖家发货')
                     return
 
-            except:
-                pass
+            except (KeyError, TypeError, IndexError):
+                logger.debug("非订单消息")
 
             # 判断消息类型
             if self.is_typing_status(message):
@@ -435,20 +456,34 @@ class XianyuLive:
                 return
 
             # 处理聊天消息
-            create_time = int(message["1"]["5"])
-            send_user_name = message["1"]["10"]["reminderTitle"]
-            send_user_id = message["1"]["10"]["senderUserId"]
-            send_message = message["1"]["10"]["reminderContent"]
+            msg_body = message[MK.MSG_DATA]
+            notification = msg_body[MK.NOTIFICATION]
+            create_time = int(msg_body[MK.TIMESTAMP])
+            send_user_name = notification[MK.REMINDER_TITLE]
+            send_user_id = notification[MK.SENDER_USER_ID]
+            send_message = notification[MK.REMINDER_CONTENT]
             
             # 时效性验证（过滤5分钟前消息）
             if (time.time() * 1000 - create_time) > self.message_expire_time:
                 logger.debug("过期消息丢弃")
                 return
-                
+
             # 获取商品ID和会话ID
-            url_info = message["1"]["10"]["reminderUrl"]
+            url_info = notification[MK.REMINDER_URL]
             item_id = url_info.split("itemId=")[1].split("&")[0] if "itemId=" in url_info else None
-            chat_id = message["1"]["2"].split('@')[0]
+            chat_id = msg_body[MK.CONVERSATION].split('@')[0]
+
+            # 消息去重（防止 WebSocket 重复推送）
+            msg_key = f"{chat_id}:{create_time}:{send_message}"
+            if msg_key in self._processed_msgs:
+                logger.debug(f"重复消息丢弃: {msg_key}")
+                return
+            self._processed_msgs[msg_key] = True
+            if len(self._processed_msgs) > self._processed_msgs_max:
+                # LRU 淘汰最旧 20%
+                evict_count = self._processed_msgs_max // 5
+                for _ in range(evict_count):
+                    self._processed_msgs.popitem(last=False)
             
             if not item_id:
                 logger.warning("无法获取商品ID")
@@ -504,11 +539,18 @@ class XianyuLive:
                 logger.info(f"从数据库获取商品信息: {item_id}")
                 
             item_description=f"当前商品的信息如下：{self.build_item_description(item_info)}"
-            
+
+            # 回复冷却检查（简单速率限制）
+            now = time.time()
+            last_reply = self._last_reply_times.get(chat_id, 0)
+            if now - last_reply < self._reply_cooldown:
+                logger.debug(f"回复冷却中，跳过会话 {chat_id}")
+                return
+
             # 获取完整的对话上下文
             context = self.context_manager.get_context_by_chat(chat_id)
             # 生成回复
-            bot_reply = bot.generate_reply(
+            bot_reply = self.bot.generate_reply(
                 send_message,
                 item_description,
                 context=context
@@ -518,12 +560,16 @@ class XianyuLive:
             if bot_reply == "-":
                 logger.info(f"[无需回复] 用户 {send_user_name} 的消息被识别为无需回复类型")
                 return
+
+            if not bot_reply or not bot_reply.strip():
+                logger.warning(f"LLM 返回空回复，跳过发送。用户: {send_user_name}, 消息: {send_message}")
+                return
             
             # 添加用户消息到上下文
             self.context_manager.add_message_by_chat(chat_id, send_user_id, item_id, "user", send_message)
             
             # 检查是否为价格意图，如果是则增加议价次数
-            if bot.last_intent == "price":
+            if self.bot.last_intent == "price":
                 self.context_manager.increment_bargain_count_by_chat(chat_id)
                 bargain_count = self.context_manager.get_bargain_count_by_chat(chat_id)
                 logger.info(f"用户 {send_user_name} 对商品 {item_id} 的议价次数: {bargain_count}")
@@ -546,7 +592,8 @@ class XianyuLive:
                 await asyncio.sleep(total_delay)
                 
             await self.send_msg(websocket, chat_id, send_user_id, bot_reply)
-            
+            self._last_reply_times[chat_id] = time.time()
+
         except Exception as e:
             logger.error(f"处理消息时发生错误: {str(e)}")
             logger.debug(f"原始消息: {message_data}")
@@ -606,8 +653,15 @@ class XianyuLive:
             logger.error(f"处理心跳响应出错: {e}")
         return False
 
+    def shutdown(self):
+        """触发优雅关停"""
+        logger.info("收到关停信号，准备退出...")
+        self._shutdown = True
+        if self.ws:
+            asyncio.ensure_future(self.ws.close())
+
     async def main(self):
-        while True:
+        while not self._shutdown:
             try:
                 # 重置连接重启标志
                 self.connection_restart_flag = False
@@ -627,7 +681,10 @@ class XianyuLive:
                 async with websockets.connect(self.base_url, extra_headers=headers) as websocket:
                     self.ws = websocket
                     await self.init(websocket)
-                    
+
+                    # 连接成功，重置重连计数器
+                    self.reconnect_attempt = 0
+
                     # 初始化心跳时间
                     self.last_heartbeat_time = time.time()
                     self.last_heartbeat_response = time.time()
@@ -640,7 +697,10 @@ class XianyuLive:
                     
                     async for message in websocket:
                         try:
-                            # 检查是否需要重启连接
+                            # 检查关停和重启标志
+                            if self._shutdown:
+                                logger.info("检测到关停信号，退出消息循环...")
+                                break
                             if self.connection_restart_flag:
                                 logger.info("检测到连接重启标志，准备重新建立连接...")
                                 break
@@ -675,12 +735,17 @@ class XianyuLive:
                             logger.error(f"处理消息时发生错误: {str(e)}")
                             logger.debug(f"原始消息: {message}")
 
+            except CookieExpiredError as e:
+                logger.error(f"Cookie 已失效: {e}")
+                logger.error("请更新 COOKIES_STR 后重启程序")
+                break
+
             except websockets.exceptions.ConnectionClosed:
                 logger.warning("WebSocket连接已关闭")
-                
+
             except Exception as e:
                 logger.error(f"连接发生错误: {e}")
-                
+
             finally:
                 # 清理任务
                 if self.heartbeat_task:
@@ -697,45 +762,57 @@ class XianyuLive:
                     except asyncio.CancelledError:
                         pass
                 
-                # 如果是主动重启，立即重连；否则等待5秒
+                # 如果正在关停，不再重连
+                if self._shutdown:
+                    logger.info("程序关停中，不再重连")
+                    break
+
+                # 如果是主动重启，立即重连；否则指数退避
                 if self.connection_restart_flag:
                     logger.info("主动重启连接，立即重连...")
                 else:
-                    logger.info("等待5秒后重连...")
-                    await asyncio.sleep(5)
+                    self.reconnect_attempt += 1
+                    if self.max_reconnect_attempts > 0 and self.reconnect_attempt >= self.max_reconnect_attempts:
+                        logger.error(f"已达最大重连次数 {self.max_reconnect_attempts}，程序退出")
+                        break
+                    delay = min(5 * (2 ** (self.reconnect_attempt - 1)), self.max_reconnect_delay)
+                    jitter = delay * 0.1 * random.random()
+                    total_delay = delay + jitter
+                    logger.info(f"等待 {total_delay:.1f}s 后重连 (attempt {self.reconnect_attempt})...")
+                    await asyncio.sleep(total_delay)
 
 
 
 def check_and_complete_env():
     """检查并补全关键环境变量"""
-    # 定义关键变量及其默认无效值（占位符）
+    headless = os.getenv("HEADLESS", "True").lower() == "true"
+
     critical_vars = {
         "API_KEY": "默认使用通义千问,apikey通过百炼模型平台获取",
         "COOKIES_STR": "your_cookies_here"
     }
-    
+
     env_path = ".env"
     updated = False
-    
+
     for key, placeholder in critical_vars.items():
         curr_val = os.getenv(key)
-        
-        # 如果变量未设置，或者值等于占位符
+
         if not curr_val or curr_val == placeholder:
+            if headless:
+                logger.error(f"配置项 [{key}] 未设置或为默认值，headless 模式下无法交互输入")
+                logger.error(f"请在 .env 文件中设置 {key} 后重新启动")
+                sys.exit(1)
+
             logger.warning(f"配置项 [{key}] 未设置或为默认值，请输入")
             while True:
                 val = input(f"请输入 {key}: ").strip()
                 if val:
-                    # 更新当前环境
                     os.environ[key] = val
-                    
-                    # 尝试持久化到 .env
                     try:
-                        # 如果没有.env文件，先创建
                         if not os.path.exists(env_path):
                             with open(env_path, 'w', encoding='utf-8') as f:
-                                pass # Create empty file
-                        
+                                pass
                         set_key(env_path, key, val)
                         updated = True
                     except Exception as e:
@@ -743,7 +820,7 @@ def check_and_complete_env():
                     break
                 else:
                     print(f"{key} 不能为空，请重新输入")
-    
+
     if updated:
         logger.info("新的配置已保存/更新至 .env 文件中")
 
@@ -753,26 +830,37 @@ if __name__ == '__main__':
     if os.path.exists(".env"):
         load_dotenv()
         logger.info("已加载 .env 配置")
-    
+
     if os.path.exists(".env.example"):
         load_dotenv(".env.example")  # 不会覆盖已存在的变量
         logger.info("已加载 .env.example 默认配置")
-    
+
     # 配置日志级别
     log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
-    logger.remove()  # 移除默认handler
+    logger.remove()
     logger.add(
         sys.stderr,
         level=log_level,
         format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
     )
     logger.info(f"日志级别设置为: {log_level}")
-    
-    # 交互式检查并补全配置
+
+    # 检查并补全配置
     check_and_complete_env()
-    
+
     cookies_str = os.getenv("COOKIES_STR")
     bot = XianyuReplyBot()
-    xianyuLive = XianyuLive(cookies_str)
+    xianyuLive = XianyuLive(cookies_str, bot)
+
+    # 注册信号处理（优雅关停）
+    def _signal_handler(sig, frame):
+        xianyuLive.shutdown()
+
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+
     # 常驻进程
-    asyncio.run(xianyuLive.main())
+    try:
+        asyncio.run(xianyuLive.main())
+    except KeyboardInterrupt:
+        logger.info("程序已退出")

@@ -1,0 +1,173 @@
+{
+  "version": "1.0",
+  "questions": [
+    {
+      "id": "q01",
+      "query": "主站和包月站有什么区别？",
+      "category": "产品概念",
+      "reference_answer": "主站(api.love-gwen.top)采用额度包形式计费，一次购买用完即止无时间限制；包月站(ai.love-gwen.top)采用包月订阅，额度30天有效期过期失效。主站令牌以sk-开头，包月站以cr_开头。",
+      "expected_sources": ["pricing.md", "guide/bindge.md", "guide/site-reference.md"],
+      "expected_keywords": ["额度包", "包月", "sk-", "cr_", "api.love-gwen.top", "ai.love-gwen.top"]
+    },
+    {
+      "id": "q02",
+      "query": "额度是什么意思？会过期吗？",
+      "category": "产品概念",
+      "reference_answer": "主站额度包一次购买用完即止无时间限制。包月站额度有效期30天，到期未用完则失效。",
+      "expected_sources": ["pricing.md", "guide/bindge.md", "guide/site-reference.md"],
+      "expected_keywords": ["额度包", "无时间限制", "30天", "失效", "包月"]
+    },
+    {
+      "id": "q03",
+      "query": "令牌分组有什么用？",
+      "category": "产品概念",
+      "reference_answer": "令牌分组是权限管理机制，用于对API令牌进行精细化权限控制。不同分组可使用不同模型，如cc分组(Claude Code特惠1x倍率)、codex分组(0.5x倍率)、default分组(1x倍率)。修改分组后立即生效。包月站不提供分组设置。",
+      "expected_sources": ["guide/token-group.md", "guide/token.md"],
+      "expected_keywords": ["权限", "分组", "cc", "codex", "default", "倍率"]
+    },
+    {
+      "id": "q04",
+      "query": "你们支持哪些模型？",
+      "category": "产品概念",
+      "reference_answer": "根据令牌分组不同可使用不同模型。常见分组包括基础分组(GPT-3.5、Haiku等)、高级分组(GPT-4、Sonnet等)、全量分组(所有模型)。具体可用模型取决于创建令牌时选择的分组。",
+      "expected_sources": ["guide/token-group.md"],
+      "expected_keywords": ["分组", "GPT", "Sonnet", "Haiku", "模型"]
+    },
+    {
+      "id": "q05",
+      "query": "API Key的格式是什么？sk开头还是cr开头？",
+      "category": "产品概念",
+      "reference_answer": "主站令牌以sk-开头(如sk-xxxxxxxx)，Codex包月站令牌以cr_开头(如cr_xxxxxxxxxx)。令牌只显示一次需立即复制保存。",
+      "expected_sources": ["guide/token.md", "guide/site-reference.md"],
+      "expected_keywords": ["sk-", "cr_", "令牌", "只显示一次"]
+    },
+    {
+      "id": "q06",
+      "query": "怎么买额度？",
+      "category": "购买充值",
+      "reference_answer": "购买流程：1.在闲鱼下单购买额度包 2.收到兑换码 3.登录主站(api.love-gwen.top)进入钱包管理 4.在兑换码充值区域输入兑换码 5.点击兑换额度完成充值。兑换码只能使用一次。",
+      "expected_sources": ["guide/bindge.md"],
+      "expected_keywords": ["闲鱼", "兑换码", "钱包管理", "兑换额度"]
+    },
+    {
+      "id": "q07",
+      "query": "1000刀额度多少钱？",
+      "category": "购买充值",
+      "reference_answer": "主站1000刀额度包售价100元。其他档位：500刀=60元、100刀=15元、20刀=3元。包月站：1500刀(30天)=50元、400刀(30天)=20元、100刀(30天)=10元、10刀(体验)=1元。",
+      "expected_sources": ["pricing.md"],
+      "expected_keywords": ["100元", "1000", "额度包"]
+    },
+    {
+      "id": "q08",
+      "query": "兑换码怎么用？",
+      "category": "购买充值",
+      "reference_answer": "登录主站(api.love-gwen.top)进入钱包管理页面，在兑换码充值区域输入兑换码，点击兑换额度即可完成充值。注意兑换码只能使用一次，需妥善保管。",
+      "expected_sources": ["guide/bindge.md"],
+      "expected_keywords": ["钱包管理", "兑换码充值", "兑换额度", "一次"]
+    },
+    {
+      "id": "q09",
+      "query": "Claude Code怎么配置？",
+      "category": "配置使用",
+      "reference_answer": "1.安装: npm install -g @anthropic-ai/claude-code 2.创建配置目录和settings.json文件(Windows: %USERPROFILE%\\.claude\\settings.json, macOS/Linux: ~/.claude/settings.json) 3.配置env中ANTHROPIC_AUTH_TOKEN(令牌)和ANTHROPIC_BASE_URL(https://api.love-gwen.top) 4.配置model(sonnet/opus/haiku) 5.验证: claude --version",
+      "expected_sources": ["guide/cli-claude.md"],
+      "expected_keywords": ["settings.json", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "api.love-gwen.top", ".claude"]
+    },
+    {
+      "id": "q10",
+      "query": "Codex怎么配置？",
+      "category": "配置使用",
+      "reference_answer": "1.安装: npm install -g @openai/codex 2.配置config.toml(包含model_provider、model、base_url等) 3.配置auth.json(OPENAI_API_KEY) 4.验证: codex --version。主站base_url: https://api.love-gwen.top/v1，包月站: https://ai.love-gwen.top/openai。",
+      "expected_sources": ["guide/cli-codex.md", "guide/cc-switch-codex.md"],
+      "expected_keywords": ["config.toml", "auth.json", "OPENAI_API_KEY", "npm install"]
+    },
+    {
+      "id": "q11",
+      "query": "CC-Switch是什么？怎么安装？",
+      "category": "配置使用",
+      "reference_answer": "CC-Switch是图形化工具，用于一键切换API配置、可视化管理配置。Windows从GitHub Releases下载.msi安装包；macOS用Homebrew: brew tap farion1231/ccswitch && brew install --cask cc-switch；Linux用.deb包安装。",
+      "expected_sources": ["guide/cc-switch-common.md"],
+      "expected_keywords": ["CC-Switch", "图形化", "一键切换", "GitHub Releases", "Homebrew"]
+    },
+    {
+      "id": "q12",
+      "query": "config.toml里的base_url怎么填？",
+      "category": "配置使用",
+      "reference_answer": "主站base_url填 https://api.love-gwen.top/v1，包月站填 https://ai.love-gwen.top/openai。注意Claude Code的base_url是 https://api.love-gwen.top（没有/v1后缀）。",
+      "expected_sources": ["guide/cli-codex.md", "guide/site-reference.md"],
+      "expected_keywords": ["api.love-gwen.top/v1", "ai.love-gwen.top/openai", "config.toml"]
+    },
+    {
+      "id": "q13",
+      "query": "Windows上怎么用Codex？",
+      "category": "配置使用",
+      "reference_answer": "强烈推荐使用WSL2运行Codex。如无法装WSL2：1.安装Node.js(官网下载或Chocolatey/Scoop) 2.配置config.toml和auth.json 3.codex --version验证。注意Windows可能中文乱码，需在设置>语言和区域中启用Unicode UTF-8。",
+      "expected_sources": ["windows.md", "guide/cli-codex.md"],
+      "expected_keywords": ["WSL2", "Node.js", "config.toml", "auth.json", "UTF-8"]
+    },
+    {
+      "id": "q14",
+      "query": "OpenCode怎么配置session_id？",
+      "category": "配置使用",
+      "reference_answer": "在CC-Switch中切换到JSON编辑模式，在headers中添加session_id={env:SESSION_ID}来触发Prompt Caching。启动时Windows用$env:SESSION_ID=[guid]::NewGuid().ToString();opencode，macOS/Linux用SESSION_ID=$(uuidgen) opencode。",
+      "expected_sources": ["guide/cc-switch-opencode.md"],
+      "expected_keywords": ["session_id", "Prompt Caching", "JSON编辑", "uuidgen"]
+    },
+    {
+      "id": "q15",
+      "query": "运行claude报Region not supported怎么办？",
+      "category": "故障排查",
+      "reference_answer": "在用户目录下的.claude.json文件中加入hasCompletedOnboarding:true即可解决。",
+      "expected_sources": ["guide/cli-claude.md", "guide/troubleshooting.md"],
+      "expected_keywords": ["hasCompletedOnboarding", ".claude.json", "true"]
+    },
+    {
+      "id": "q16",
+      "query": "API认证失败是什么原因？",
+      "category": "故障排查",
+      "reference_answer": "认证失败常见原因：1.API Key未复制完整 2.Key前缀与站点不匹配(主站sk-,包月站cr_) 3.账户余额不足 4.令牌分组不包含目标模型。请检查以上各项。",
+      "expected_sources": ["guide/cli-claude.md", "guide/cli-codex.md", "guide/troubleshooting.md"],
+      "expected_keywords": ["认证", "API Key", "分组", "余额", "sk-", "cr_"]
+    },
+    {
+      "id": "q17",
+      "query": "Windows终端中文乱码怎么解决？",
+      "category": "故障排查",
+      "reference_answer": "进入Windows设置>时间和语言>语言和区域，在管理语言设置中启用Unicode UTF-8全球语言支持。或者推荐使用WSL2来运行Codex避免兼容性问题。",
+      "expected_sources": ["guide/cli-codex.md", "windows.md", "guide/troubleshooting.md"],
+      "expected_keywords": ["UTF-8", "语言和区域", "WSL2", "乱码"]
+    },
+    {
+      "id": "q18",
+      "query": "连接超时了怎么排查？",
+      "category": "故障排查",
+      "reference_answer": "检查网络是否能访问对应站点地址(主站api.love-gwen.top或包月站ai.love-gwen.top)。如使用代理需确认CLI工具的代理设置正确。",
+      "expected_sources": ["guide/cli-claude.md", "guide/cli-codex.md", "guide/troubleshooting.md"],
+      "expected_keywords": ["网络", "超时", "代理"]
+    },
+    {
+      "id": "q19",
+      "query": "怎么查看我的余额？",
+      "category": "账户管理",
+      "reference_answer": "主站余额：登录api.love-gwen.top进入钱包管理页面查看。包月站余额：访问ai.love-gwen.top输入API Key查询剩余额度和到期时间。",
+      "expected_sources": ["guide/bindge.md", "guide/cli-codex.md", "guide/site-reference.md", "guide/troubleshooting.md"],
+      "expected_keywords": ["钱包管理", "ai.love-gwen.top", "API Key", "余额"]
+    },
+    {
+      "id": "q20",
+      "query": "包月站额度怎么查？",
+      "category": "账户管理",
+      "reference_answer": "访问包月站地址https://ai.love-gwen.top，输入你的API Key(cr_开头)即可查看剩余额度和到期时间。",
+      "expected_sources": ["guide/cli-codex.md", "guide/cc-switch-codex.md", "guide/site-reference.md", "guide/bindge.md", "guide/troubleshooting.md"],
+      "expected_keywords": ["ai.love-gwen.top", "cr_", "API Key", "额度"]
+    },
+    {
+      "id": "q21",
+      "query": "怎么注册账号？",
+      "category": "账户管理",
+      "reference_answer": "访问主站https://api.love-gwen.top，点击右上角注册按钮，填写用户名和密码(8-20位)，点击注册即可。注册后需登录、购买额度、创建令牌才能使用。",
+      "expected_sources": ["guide/register.md"],
+      "expected_keywords": ["注册", "api.love-gwen.top", "用户名", "密码"]
+    }
+  ]
+}

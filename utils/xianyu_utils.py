@@ -1,4 +1,5 @@
 import json
+import os
 import time
 import hashlib
 import base64
@@ -14,7 +15,7 @@ def trans_cookies(cookies_str: str) -> Dict[str, str]:
             parts = cookie.split('=', 1)
             if len(parts) == 2:
                 cookies[parts[0]] = parts[1]
-        except:
+        except (ValueError, IndexError):
             continue
     return cookies
 
@@ -60,7 +61,7 @@ def generate_device_id(user_id: str) -> str:
 
 def generate_sign(t: str, token: str, data: str) -> str:
     """生成签名"""
-    app_key = "34839810"
+    app_key = os.getenv("GOOFISH_APP_KEY", "34839810")
     msg = f"{token}&{t}&{app_key}&{data}"
     
     # 使用MD5生成签名
@@ -312,7 +313,7 @@ def decrypt(data: str) -> str:
                 if isinstance(obj, bytes):
                     try:
                         return obj.decode('utf-8')
-                    except:
+                    except UnicodeDecodeError:
                         return base64.b64encode(obj).decode('utf-8')
                 elif hasattr(obj, '__dict__'):
                     return obj.__dict__
@@ -326,7 +327,7 @@ def decrypt(data: str) -> str:
             try:
                 text_result = decoded_bytes.decode('utf-8')
                 return json.dumps({"text": text_result})
-            except:
+            except UnicodeDecodeError:
                 # 最后的备选方案：返回十六进制表示
                 hex_result = decoded_bytes.hex()
                 return json.dumps({"hex": hex_result, "error": f"Decode failed: {str(e)}"})

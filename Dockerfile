@@ -1,29 +1,27 @@
-FROM python:3.10-alpine AS builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# 只安装构建所需的依赖
-RUN apk add --no-cache --virtual .build-deps \
+# 安装构建依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    musl-dev \
-    libffi-dev \
-    build-base
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # 创建虚拟环境并安装依赖
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # 复制依赖文件并安装
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml .
+RUN pip install --no-cache-dir .
 
 # 第二阶段：最终镜像
-FROM python:3.10-alpine
+FROM python:3.12-slim
 
-# 添加元数据标签
 LABEL maintainer="coderxiu<coderxiu@qq.com>"
 LABEL description="闲鱼AI客服机器人"
-LABEL version="2.0"
+LABEL version="3.0"
 
 # 设置时区和编码
 ENV TZ=Asia/Shanghai \
@@ -31,17 +29,16 @@ ENV TZ=Asia/Shanghai \
     LANG=C.UTF-8 \
     PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    HEADLESS=True
 
-# 只安装运行时必要的包
-RUN apk add --no-cache \
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
     tzdata \
     && ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo Asia/Shanghai > /etc/timezone \
-    # 清理apk缓存
-    && rm -rf /var/cache/apk/*
+    && rm -rf /var/lib/apt/lists/*
 
-# 设置工作目录
 WORKDIR /app
 
 # 从构建阶段复制虚拟环境
@@ -50,15 +47,12 @@ COPY --from=builder /opt/venv /opt/venv
 # 创建必要的目录
 RUN mkdir -p data prompts
 
-# 复制示例提示词文件并重命名为正式文件
-COPY prompts/classify_prompt_example.txt prompts/classify_prompt.txt
-COPY prompts/price_prompt_example.txt prompts/price_prompt.txt
-COPY prompts/tech_prompt_example.txt prompts/tech_prompt.txt
-COPY prompts/default_prompt_example.txt prompts/default_prompt.txt
+# 复制提示词文件
+COPY prompts/tech_prompt.txt prompts/tech_prompt.txt
+COPY prompts/default_prompt.txt prompts/default_prompt.txt
 
-# 只复制绝对必要的文件
-COPY main.py XianyuAgent.py XianyuApis.py context_manager.py ./
+# 复制应用代码
+COPY main.py XianyuAgent.py XianyuApis.py context_manager.py rag_service.py build_index.py ./
 COPY utils/ utils/
 
-# 容器启动时运行的命令
 CMD ["python", "main.py"]

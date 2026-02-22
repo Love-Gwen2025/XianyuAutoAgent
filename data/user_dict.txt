@@ -1,0 +1,23 @@
+GwenAPI 5 nz
+CC-Switch 5 nz
+Claude Code 5 nz
+令牌管理 5 n
+API密钥 5 n
+访问令牌 5 n
+刷新令牌 5 n
+包月站 5 n
+额度包 5 n
+兑换码 5 n
+base_url 5 nz
+config.toml 5 nz
+auth.json 5 nz
+Codex 5 nz
+OpenCode 5 nz
+session_id 5 nz
+主站 5 n
+钱包管理 5 n
+WSL2 5 nz
+认证失败 5 n
+连接超时 5 n
+令牌分组 5 n
+中文乱码 5 n
